@@ -53,9 +53,40 @@ intents.members = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Conexión a Google Drive
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-drive_service = build('drive', 'v3', credentials=credentials)
+# Intentar cargar credenciales desde archivo local o variable de entorno
+drive_service = None
+try:
+    import json
+    # Primero intentar desde variable de entorno (para deploy)
+    creds_json = os.getenv('GOOGLE_CREDENTIALS')
+    
+    if creds_json:
+        print("📌 Intentando usar GOOGLE_CREDENTIALS desde variable de entorno...")
+        try:
+            creds_dict = json.loads(creds_json)
+            credentials = service_account.Credentials.from_service_account_info(
+                creds_dict, scopes=SCOPES)
+            drive_service = build('drive', 'v3', credentials=credentials)
+            print("✅ Google Drive conectado desde variable de entorno")
+        except json.JSONDecodeError as je:
+            print(f"❌ Error parsando JSON de GOOGLE_CREDENTIALS: {je}")
+            print("Verificar que el formato JSON sea correcto (sin saltos de línea extra)")
+        except Exception as e:
+            print(f"❌ Error autenticando con GOOGLE_CREDENTIALS: {e}")
+    else:
+        print("📌 GOOGLE_CREDENTIALS no definida, intentando desde archivo...")
+        # Si no, cargar desde archivo (desarrollo local)
+        credentials = service_account.Credentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+        drive_service = build('drive', 'v3', credentials=credentials)
+        print("✅ Google Drive conectado desde archivo local")
+        
+except FileNotFoundError:
+    print(f"⚠️ Archivo {SERVICE_ACCOUNT_FILE} no encontrado. Google Drive no disponible en producción.")
+    print("Solución: Añade la variable de entorno GOOGLE_CREDENTIALS en Koyeb")
+except Exception as e:
+    print(f"⚠️ No se pudo conectar a Google Drive: {e}")
+    print("Las funciones que requieren Google Drive no estarán disponibles")
 
 # ==================== BASE DE DATOS ====================
 def init_db():
@@ -148,6 +179,8 @@ def init_db():
 # ==================== FUNCIONES DE GOOGLE DRIVE ====================
 def subir_a_drive(archivo_path, nombre_archivo):
     """Sube un archivo a Google Drive y retorna el link"""
+    if not drive_service:
+        return None
     try:
         file_metadata = {
             'name': nombre_archivo,
