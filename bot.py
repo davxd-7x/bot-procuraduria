@@ -29,17 +29,21 @@ async def run_web_server():
     app.router.add_get('/health', handle_health)
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    port = int(os.getenv('PORT', 8080))
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    print('🌐 Servidor web iniciado en puerto 8080')
+    print(f'🌐 Servidor web iniciado en puerto {port}')
 
 # ==================== CONFIGURACIÓN ====================
 SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_FILE = 'credentials.json'
 DRIVE_FOLDER_ID = '1fND6FHVGPNFFkJTcWBBeYzN5a4WGI1ZZ'  # Cambiar por el ID de tu carpeta
-CANAL_PQRS_ID = 1446146371601174660  # Cambiar por el ID del canal de PQRS
-ROL_PROCURADURIA_ID = 1446146440849129493  # Cambiar por el ID del rol de Procuraduria
-REGISTROS_CHANNEL_ID = 1446155330298970203  # Cambiar por el ID del canal de registros
+CANAL_PQRS_ID = 1446524564006768751 # Cambiar por el ID del canal de PQRS
+ROL_PROCURADURIA_ID = 1220833789308174467  # Cambiar por el ID del rol de Procuraduria
+REGISTROS_CHANNEL_ID = 1446522781897330699  # Cambiar por el ID del canal de registros
+# Rol adicional autorizado a responder PQRS (poner el ID aquí o definir RESPONDER_ROLE_ID en .env)
+# Si lo dejas en 0 o None, solo el rol de Procuraduría podrá responder.
+RESPONDER_ROLE_ID = 1289418666353623090
 
 # ==================== INICIALIZACIÓN ====================
 intents = discord.Intents.default()
@@ -707,10 +711,39 @@ async def registrar_caso(
     radicado="Número de radicado",
     respuesta="Respuesta a la PQRS"
 )
-@es_procuraduria()
 async def responder_pqrs(interaction: discord.Interaction, radicado: str, respuesta: str):
     await interaction.response.defer(ephemeral=True)
-    
+    # Permisos: permitir solo al rol adicional configurado (RESPONDER_ROLE_ID o .env)
+    responder_role = None
+    if interaction.guild:
+        try:
+            env_id = os.getenv('RESPONDER_ROLE_ID')
+            if env_id:
+                responder_role = interaction.guild.get_role(int(env_id))
+        except Exception:
+            responder_role = None
+        if not responder_role and RESPONDER_ROLE_ID:
+            try:
+                responder_role = interaction.guild.get_role(int(RESPONDER_ROLE_ID))
+            except Exception:
+                responder_role = None
+
+    # Si no hay rol configurado, denegar por seguridad
+    if not responder_role:
+        await interaction.followup.send(
+            "❌ No hay un rol autorizado configurado para responder PQRS. Contacta al administrador.",
+            ephemeral=True
+        )
+        return
+
+    # Comprobar que el usuario tiene el rol autorizado
+    if responder_role not in interaction.user.roles:
+        await interaction.followup.send(
+            "❌ No tienes permisos para responder PQRS.",
+            ephemeral=True
+        )
+        return
+
     conn = sqlite3.connect('procuraduria.db')
     c = conn.cursor()
     
@@ -865,12 +898,14 @@ async def terminar_proceso(interaction: discord.Interaction, radicado: str):
         conn.close()
 # ==================== EJECUTAR BOT ====================
 if __name__ == "__main__":
+    # Cargar variables de entorno
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()  # Solo en desarrollo local
+    except:
+        pass  # En Fly.io no necesita dotenv
+    
     TOKEN = os.getenv('DISCORD_TOKEN')
-    if not TOKEN:
-        print("❌ ERROR: No se encontró el token de Discord")
-        print("Crea un archivo .env con: DISCORD_TOKEN=tu_token_aqui")
-    else:
-        bot.run(TOKEN)
 
 
 @bot.tree.command(name="editar-iuc", description="[PROCURADURÍA] Editar la parte numérica final de un IUC (solo procuraduría)")
