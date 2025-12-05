@@ -930,6 +930,60 @@ async def terminar_proceso(interaction: discord.Interaction, radicado: str):
     finally:
         conn.close()
 
+@bot.tree.command(name="borrar-caso", description="[PROCURADURÍA] Eliminar un caso de la base de datos (solo procuraduría)")
+@app_commands.describe(iuc="Radicado IUC a eliminar (ej: IUC-E-2025-0001)")
+@es_procuraduria()
+async def borrar_caso(interaction: discord.Interaction, iuc: str):
+    await interaction.response.defer(ephemeral=True)
+    
+    conn = sqlite3.connect('procuraduria.db')
+    c = conn.cursor()
+    
+    # Verificar que el caso existe
+    c.execute("SELECT id FROM casos WHERE iuc = ?", (iuc.upper(),))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        await interaction.followup.send(f"❌ No se encontró el caso {iuc.upper()}", ephemeral=True)
+        return
+    
+    try:
+        caso_id = row[0]
+        iuc_upper = iuc.upper()
+        
+        # Eliminar documentos adjuntos a este caso
+        c.execute("DELETE FROM documentos WHERE attached_iuc = ?", (iuc_upper,))
+        docs_deleted = c.rowcount
+        
+        # Eliminar el caso
+        c.execute("DELETE FROM casos WHERE id = ?", (caso_id,))
+        
+        conn.commit()
+        
+        await interaction.followup.send(
+            f"✅ Caso {iuc_upper} eliminado correctamente.\n"
+            f"📄 Documentos eliminados: {docs_deleted}",
+            ephemeral=True
+        )
+        
+        # Log en canal de registros
+        try:
+            channel = bot.get_channel(REGISTROS_CHANNEL_ID) or await bot.fetch_channel(REGISTROS_CHANNEL_ID)
+            embed = discord.Embed(title="⚠️ Caso eliminado", color=discord.Color.red(), timestamp=datetime.now())
+            embed.add_field(name="IUC", value=iuc_upper, inline=True)
+            embed.add_field(name="Documentos eliminados", value=str(docs_deleted), inline=True)
+            embed.add_field(name="Eliminado por", value=interaction.user.name, inline=True)
+            embed.add_field(name="Razón", value="Eliminación de base de datos (error procurador/numérico)", inline=False)
+            await channel.send(embed=embed)
+        except Exception:
+            pass
+            
+    except Exception as e:
+        conn.rollback()
+        await interaction.followup.send(f"❌ Error eliminando el caso: {e}", ephemeral=True)
+    finally:
+        conn.close()
+
 @bot.tree.command(name="editar-iuc", description="[PROCURADURÍA] Editar la parte numérica final de un IUC (solo procuraduría)")
 @app_commands.describe(
     iuc_actual="IUC actual a editar (ej: IUC-E-2025-0001)",
