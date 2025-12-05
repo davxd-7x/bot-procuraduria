@@ -929,17 +929,6 @@ async def terminar_proceso(interaction: discord.Interaction, radicado: str):
         await interaction.followup.send(f"❌ Error archivando el caso: {e}", ephemeral=True)
     finally:
         conn.close()
-# ==================== EJECUTAR BOT ====================
-if __name__ == "__main__":
-    # Cargar variables de entorno
-    try:
-        from dotenv import load_dotenv
-        load_dotenv()  # Solo en desarrollo local
-    except:
-        pass  # En Fly.io no necesita dotenv
-    
-    TOKEN = os.getenv('DISCORD_TOKEN')
-
 
 @bot.tree.command(name="editar-iuc", description="[PROCURADURÍA] Editar la parte numérica final de un IUC (solo procuraduría)")
 @app_commands.describe(
@@ -981,3 +970,13 @@ async def editar_iuc(interaction: discord.Interaction, iuc_actual: str, nuevo_nu
         await interaction.followup.send(f"❌ Error actualizando IUC: {e}", ephemeral=True)
     finally:
         conn.close()
+
+# ==================== EJECUTAR BOT ====================
+if __name__ == "__main__":
+    TOKEN = os.getenv('DISCORD_TOKEN')
+    if not TOKEN:
+        print("❌ ERROR: No se encontró el token de Discord")
+        print("Crea un archivo .env con: DISCORD_TOKEN=tu_token_aqui")
+        exit(1)
+    else:
+        bot.run(TOKEN)
