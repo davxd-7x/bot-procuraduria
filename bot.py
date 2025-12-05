@@ -286,23 +286,23 @@ async def buscar_caso(interaction: discord.Interaction, iuc: str):
 
     iuc_val, tipo_val, estado_val, visibilidad_val = caso[0], caso[1], caso[2], (caso[3] if len(caso) > 3 else 'PUBLICO')
 
-    # Si el caso es reservado y el usuario no es procuraduría, negar acceso a documentos
+    # Si el caso es reservado y el usuario no es procuraduría, negar acceso a TODO
     rol = interaction.guild.get_role(ROL_PROCURADURIA_ID)
     es_procuraduria_user = rol in interaction.user.roles if rol else False
     if visibilidad_val and visibilidad_val.upper() == 'RESERVADO' and not es_procuraduria_user:
-        await interaction.followup.send("🔒 El proceso es RESERVADO. No se puede brindar ningún documento hasta su finalización.", ephemeral=True)
+        await interaction.followup.send("🔒 Caso reservado", ephemeral=True)
         return
 
-    # mostrar también documentos adjuntos
+    # mostrar también documentos adjuntos (solo si NO es reservado o si es procuraduría)
     conn = sqlite3.connect('procuraduria.db')
     c = conn.cursor()
     c.execute("SELECT tipo, numero, anio, titulo, ius FROM documentos WHERE attached_iuc = ?", (iuc.upper(),))
     attached_docs = c.fetchall()
     conn.close()
 
-    msg = f"**Caso {iuc_val}**\\nTipo: {tipo_val}\\nEstado: {estado_val}"
+    msg = f"**Caso {iuc_val}**\nTipo: {tipo_val}\nEstado: {estado_val}"
     if attached_docs:
-        msg += "\\n\\nDocumentos adjuntos:\\n" + "\\n".join([f"- {d[0]} {d[1]} de {d[2]} | IUS: {d[4]}" for d in attached_docs])
+        msg += "\n\nDocumentos adjuntos:\n" + "\n".join([f"- {d[0]} {d[1]} de {d[2]} | IUS: {d[4]}" for d in attached_docs])
     await interaction.followup.send(msg, ephemeral=True)
 
 @bot.tree.command(name="radicar-pqrs", description="Radicar una Petición, Queja, Reclamo o Solicitud")
