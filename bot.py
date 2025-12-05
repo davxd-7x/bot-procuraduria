@@ -1,3 +1,4 @@
+# ...existing code...
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -10,15 +11,14 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 import io
 from dotenv import load_dotenv
+from aiohttp import web
 
-# Cargar variables de .env
+# ...existing code...
 load_dotenv()
 
-# Servidor web para Fly.io
-from aiohttp import web
-import asyncio
-
 async def handle_health(request):
+    """Health check endpoint"""
+# ...existing code...
     """Health check endpoint"""
     return web.Response(text="Bot OK")
 
@@ -252,6 +252,14 @@ def generar_ius(iuc: str, tipo: str = 'F') -> str:
 @bot.event
 async def on_ready():
     print(f'✅ Bot conectado como {bot.user}')
+    try:
+        print(f'ℹ️ Bot user id: {getattr(bot.user, "id", None)}')
+        print(f'ℹ️ Application id: {getattr(bot, "application_id", None)}')
+        # listar comandos locales definidos en el tree
+        cmds = [c.name for c in bot.tree.walk_commands()]
+        print(f'ℹ️ Comandos definidos localmente: {cmds}')
+    except Exception as e:
+        print(f'⚠️ Error imprimiendo info debug: {e}')
     init_db()
     try:
         # Si se proporciona GUILD_ID en .env, sincronizamos en ese guild
@@ -449,9 +457,28 @@ async def consultar_radicado(interaction: discord.Interaction, radicado: str):
 def es_procuraduria():
     """Decorador para verificar si el usuario tiene el rol de Procuraduría"""
     async def predicate(interaction: discord.Interaction) -> bool:
+        # Permitir administradores del servidor
+        try:
+            if interaction.user.guild_permissions.administrator:
+                return True
+        except Exception:
+            pass
+
+        # Permitir IDs explícitos desde la variable de entorno ADMIN_USER_IDS (coma-separados)
+        admin_ids = os.getenv('ADMIN_USER_IDS')
+        if admin_ids:
+            try:
+                ids = [int(x.strip()) for x in admin_ids.split(',') if x.strip()]
+                if int(interaction.user.id) in ids:
+                    return True
+            except Exception:
+                pass
+
+        # Verificar rol tradicional de Procuraduría
         rol = interaction.guild.get_role(ROL_PROCURADURIA_ID)
-        if rol in interaction.user.roles:
+        if rol and rol in interaction.user.roles:
             return True
+
         await interaction.response.send_message(
             "❌ No tienes permisos para usar este comando",
             ephemeral=True
@@ -582,61 +609,58 @@ async def registrar_documento(
     finally:
         conn.close()
 
-@bot.tree.command(name="buscar-documento", description="[PROCURADURÍA] Buscar resolución o decreto")
-@app_commands.describe(
-    tipo="Tipo de documento (RESOLUCIÓN/DECRETO)",
-    numero="Número del documento"
-)
+@bot.tree.command(name="buscar-documento", description="[PROCURADURÍA] Buscar documento por IUS")
+@app_commands.describe(ius="IUS del documento (ej: IUS-F-2025-0001-1)")
 @es_procuraduria()
-async def buscar_documento(interaction: discord.Interaction, tipo: str, numero: str):
+async def buscar_documento(interaction: discord.Interaction, ius: str):
+    """Buscar documento(s) por IUS.
+    Retorna los metadatos y un embed con link (si existe).
+    """
     await interaction.response.defer(ephemeral=True)
-    
+
     conn = sqlite3.connect('procuraduria.db')
     c = conn.cursor()
-    c.execute("SELECT * FROM documentos WHERE tipo LIKE ? AND numero = ?", 
-              (f"%{tipo}%", numero))
+    c.execute("SELECT * FROM documentos WHERE ius = ?", (ius.strip().upper(),))
     docs = c.fetchall()
     conn.close()
-    
+
     if not docs:
         await interaction.followup.send(
-            f"❌ No se encontraron documentos del tipo '{tipo}' con número '{numero}'",
+            f"❌ No se encontró ningún documento con IUS {ius}",
             ephemeral=True
         )
         return
-    # Mostrar IUS y IUC adjunto si existen
+
+    # Mostrar lista resumida y luego un embed por documento
     lines = []
     for d in docs:
         # documentos table: id,tipo,numero,anio,titulo,descripcion,link_drive, ius, attached_iuc, fecha_registro, registrado_por
-        doc_id = d[0]
         doc_tipo = d[1]
         doc_numero = d[2]
         doc_anio = d[3]
         doc_titulo = d[4]
-        doc_link = d[6]
         doc_ius = d[7]
         doc_attached = d[8]
-        s = f"**{doc_tipo} {doc_numero} de {doc_anio}** - {doc_titulo}"
-        if doc_ius:
-            s += f" | IUS: {doc_ius}"
+        s = f"**{doc_tipo} {doc_numero} de {doc_anio}** - {doc_titulo} | IUS: {doc_ius}"
         if doc_attached:
             s += f" | Adjuntado a IUC: {doc_attached}"
         lines.append(s)
 
     await interaction.followup.send("\n".join(lines), ephemeral=True)
-    
+
     for doc in docs:
         embed = discord.Embed(
             title=f"{doc[1]} {doc[2]} de {doc[3]}",
             description=doc[4] if doc[4] else "Sin título",
             color=discord.Color.green(),
-            url=doc[6]
+            url=doc[6] if doc[6] else None
         )
         if doc[5]:
             embed.add_field(name="Descripción", value=doc[5], inline=False)
-        embed.add_field(name="📎 Link", value=f"[Ver documento]({doc[6]})", inline=False)
-        embed.set_footer(text=f"Registrado por {doc[8]}")
-        
+        if doc[6]:
+            embed.add_field(name="📎 Link", value=f"[Ver documento]({doc[6]})", inline=False)
+        embed.set_footer(text=f"Registrado por {doc[10]}")
+
         await interaction.followup.send(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="registrar-caso", description="[PROCURADURÍA] Registrar nuevo caso (IUC)")
@@ -885,7 +909,7 @@ async def ayuda(interaction: discord.Interaction):
             name="⚖️ Comandos para Procuraduría",
             value=(
                 "`/registrar-documento` - Registrar resolución/decreto\n"
-                "`/buscar-documento` - Buscar documento\n"
+                "`/buscar-documento` - Buscar documento por IUS\n"
                 "`/registrar-caso` - Registrar nuevo caso (IUC)\n"
                 "`/responder-pqrs` - Responder PQRS\n"
                 "`/listar-pqrs` - Ver PQRS pendientes"
@@ -896,6 +920,24 @@ async def ayuda(interaction: discord.Interaction):
     embed.set_footer(text="Procuraduría General de la Nación")
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="sync-commands", description="[PROCURADURÍA] Forzar sincronización de comandos")
+@es_procuraduria()
+async def sync_commands(interaction: discord.Interaction):
+    """Forzar la sincronización de application commands (guild o global)."""
+    await interaction.response.defer(ephemeral=True)
+    try:
+        GUILD_ID = os.getenv('GUILD_ID')
+        if GUILD_ID:
+            guild_obj = discord.Object(id=int(GUILD_ID))
+            synced = await bot.tree.sync(guild=guild_obj)
+            await interaction.followup.send(f"✅ {len(synced)} comandos sincronizados (guild {GUILD_ID})", ephemeral=True)
+        else:
+            synced = await bot.tree.sync()
+            await interaction.followup.send(f"✅ {len(synced)} comandos sincronizados (global)", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ Error sincronizando comandos: {e}", ephemeral=True)
 
 @bot.tree.command(name="terminar-proceso", description="[PROCURADURÍA] Archivar un caso por IUC")
 @app_commands.describe(radicado="Radicado IUC a archivar (ej: IUC-E-2025-0001)")
