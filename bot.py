@@ -232,8 +232,8 @@ async def on_ready():
             print(f'✅ {len(synced)} comandos sincronizados (global)')
     except Exception as e:
         print(f'❌ Error sincronizando comandos: {e}')
-     # Iniciar servidor web para Fly.io
-    asyncio.create_task(run_web_server())  # ← AGREGAR ESTA LÍNEA
+    # Iniciar servidor web para Fly.io
+    asyncio.create_task(run_web_server())
 
 # ==================== COMANDOS PARA CIUDADANOS ====================
 @bot.tree.command(name="buscar-caso", description="Buscar un caso por IUC (solo ciudadanos)")
