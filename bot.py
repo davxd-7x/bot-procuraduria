@@ -97,8 +97,6 @@ def init_db():
     c.execute('''CREATE TABLE IF NOT EXISTS documentos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tipo TEXT NOT NULL,
-        numero TEXT NOT NULL,
-        anio INTEGER NOT NULL,
         titulo TEXT,
         descripcion TEXT,
         link_drive TEXT,
@@ -252,14 +250,6 @@ def generar_ius(iuc: str, tipo: str = 'F') -> str:
 @bot.event
 async def on_ready():
     print(f'✅ Bot conectado como {bot.user}')
-    try:
-        print(f'ℹ️ Bot user id: {getattr(bot.user, "id", None)}')
-        print(f'ℹ️ Application id: {getattr(bot, "application_id", None)}')
-        # listar comandos locales definidos en el tree
-        cmds = [c.name for c in bot.tree.walk_commands()]
-        print(f'ℹ️ Comandos definidos localmente: {cmds}')
-    except Exception as e:
-        print(f'⚠️ Error imprimiendo info debug: {e}')
     init_db()
     try:
         # Si se proporciona GUILD_ID en .env, sincronizamos en ese guild
@@ -457,23 +447,6 @@ async def consultar_radicado(interaction: discord.Interaction, radicado: str):
 def es_procuraduria():
     """Decorador para verificar si el usuario tiene el rol de Procuraduría"""
     async def predicate(interaction: discord.Interaction) -> bool:
-        # Permitir administradores del servidor
-        try:
-            if interaction.user.guild_permissions.administrator:
-                return True
-        except Exception:
-            pass
-
-        # Permitir IDs explícitos desde la variable de entorno ADMIN_USER_IDS (coma-separados)
-        admin_ids = os.getenv('ADMIN_USER_IDS')
-        if admin_ids:
-            try:
-                ids = [int(x.strip()) for x in admin_ids.split(',') if x.strip()]
-                if int(interaction.user.id) in ids:
-                    return True
-            except Exception:
-                pass
-
         # Verificar rol tradicional de Procuraduría
         rol = interaction.guild.get_role(ROL_PROCURADURIA_ID)
         if rol and rol in interaction.user.roles:
@@ -489,8 +462,6 @@ def es_procuraduria():
 @bot.tree.command(name="registrar-documento", description="[PROCURADURÍA] Registrar resolución o decreto")
 @app_commands.describe(
     tipo="Tipo de documento",
-    numero="Número del documento",
-    anio="Año",
     titulo="Título del documento",
     link="Link de Google Drive",
     adjuntar_iuc="Radicado IUC al que adjuntar (opcional, ej: IUC-E-2025-0001)",
@@ -500,8 +471,6 @@ def es_procuraduria():
 async def registrar_documento(
     interaction: discord.Interaction,
     tipo: str,
-    numero: str,
-    anio: int,
     titulo: str,
     link: str,
     adjuntar_iuc: str = None,
@@ -532,9 +501,9 @@ async def registrar_documento(
     
     try:
         c.execute("""INSERT INTO documentos 
-            (tipo, numero, anio, titulo, link_drive, ius, attached_iuc, registrado_por) 
+            (tipo, titulo, link_drive, ius, attached_iuc, registrado_por) 
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (tipo.upper(), numero, anio, titulo, link, ius_value, attached, interaction.user.name))
+            (tipo.upper(), titulo, link, ius_value, attached, interaction.user.name))
         conn.commit()
         
         # Actualizar el mensaje del caso si está adjunto a un IUC
@@ -551,7 +520,7 @@ async def registrar_documento(
                         mensaje = await channel.fetch_message(mensaje_id)
                         
                         # Obtener todos los documentos adjuntos a este caso
-                        c.execute("SELECT tipo, numero, anio, titulo, link_drive, ius FROM documentos WHERE attached_iuc = ? ORDER BY fecha_registro", (attached,))
+                        c.execute("SELECT tipo, titulo, link_drive, ius FROM documentos WHERE attached_iuc = ? ORDER BY fecha_registro", (attached,))
                         docs = c.fetchall()
                         
                         # Construir lista de adjuntos
@@ -585,7 +554,7 @@ async def registrar_documento(
         try:
             channel = bot.get_channel(REGISTROS_CHANNEL_ID) or await bot.fetch_channel(REGISTROS_CHANNEL_ID)
             embed = discord.Embed(title="Nuevo documento registrado", color=discord.Color.blue(), timestamp=datetime.now())
-            embed.add_field(name="Documento", value=f"{tipo.upper()} {numero} de {anio}", inline=False)
+            embed.add_field(name="Documento", value=f"{tipo.upper()} ", inline=False)
             embed.add_field(name="Título", value=titulo or "-", inline=False)
             if attached:
                 embed.add_field(name="Adjunto a IUC", value=attached, inline=True)
@@ -598,7 +567,7 @@ async def registrar_documento(
             pass
         
         await interaction.followup.send(
-            f"✅ Documento registrado:\n**{tipo} {numero} de {anio}**\n{titulo}" + (f"\nRadicado IUS generado: **{ius_value}**" if ius_value else ""),
+            f"✅ Documento registrado:\n**{tipo} **\n{titulo}" + (f"\nRadicado IUS generado: **{ius_value}**" if ius_value else ""),
             ephemeral=True
         )
     except sqlite3.IntegrityError:
@@ -920,7 +889,6 @@ async def ayuda(interaction: discord.Interaction):
     embed.set_footer(text="Procuraduría General de la Nación")
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
-
 
 @bot.tree.command(name="sync-commands", description="[PROCURADURÍA] Forzar sincronización de comandos")
 @es_procuraduria()
